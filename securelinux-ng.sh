@@ -31,6 +31,11 @@ HAS_K8S=0
 SSH_ROOT_LOGIN_DROPIN="/etc/ssh/sshd_config.d/60-securelinux-ng-root-login.conf"
 SSH_ROOT_LOGIN_CONTENT=$'# Managed by SecureLinux-NG\nPermitRootLogin no\n'
 
+PAM_SU_FILE="/etc/pam.d/su"
+PAM_WHEEL_BLOCK_BEGIN="# BEGIN SecureLinux-NG 2.2.1"
+PAM_WHEEL_BLOCK_END="# END SecureLinux-NG 2.2.1"
+PAM_WHEEL_LINE="auth required pam_wheel.so use_uid group=wheel"
+
 declare -a WARNINGS=()
 declare -a ERRORS=()
 declare -a SAFE_ITEMS=()
@@ -222,6 +227,116 @@ apply_ssh_root_login_module() {
     else
         add_error "2.1.2 sshd -t failed after writing $SSH_ROOT_LOGIN_DROPIN"
         record_manifest_warning "2.1.2 sshd -t failed after writing $SSH_ROOT_LOGIN_DROPIN"
+        return 1
+    fi
+}
+
+
+pam_wheel_group_exists() {
+    getent group wheel >/dev/null 2>&1
+}
+
+pam_wheel_rule_present() {
+    [[ -f "$PAM_SU_FILE" ]] || return 1
+    grep -Eq '^[[:space:]]*auth[[:space:]]+required[[:space:]]+pam_wheel\.so([[:space:]]+.*)?[[:space:]]use_uid([[:space:]]+.*)?[[:space:]]group=wheel([[:space:]]+.*)?$' "$PAM_SU_FILE"
+}
+
+pam_wheel_managed_block_present() {
+    [[ -f "$PAM_SU_FILE" ]] || return 1
+    grep -Fq "$PAM_WHEEL_BLOCK_BEGIN" "$PAM_SU_FILE" && grep -Fq "$PAM_WHEEL_BLOCK_END" "$PAM_SU_FILE"
+}
+
+check_pam_wheel_module() {
+    local group_ok=0
+    local rule_ok=0
+
+    pam_wheel_group_exists && group_ok=1 || true
+    pam_wheel_rule_present && rule_ok=1 || true
+
+    if (( group_ok == 1 && rule_ok == 1 )); then
+        add_safe "2.2.1 su restricted via pam_wheel and group wheel"
+        return 0
+    fi
+
+    if (( group_ok == 0 )); then
+        add_risky "2.2.1 missing group wheel"
+    fi
+    if (( rule_ok == 0 )); then
+        add_risky "2.2.1 missing active pam_wheel rule in $PAM_SU_FILE"
+    fi
+}
+
+apply_pam_wheel_module() {
+    local need_backup=0
+
+    if pam_wheel_group_exists && pam_wheel_rule_present; then
+        add_safe "2.2.1 su restriction already configured"
+        record_manifest_apply_report "2.2.1 already compliant: wheel + pam_wheel"
+        return 0
+    fi
+
+    if (( DRY_RUN == 1 )); then
+        if ! pam_wheel_group_exists; then
+            log "[DRY-RUN] groupadd wheel"
+        fi
+        if [[ -f "$PAM_SU_FILE" ]]; then
+            log "[DRY-RUN] backup '$PAM_SU_FILE' -> '$STATE_DIR/$(basename "$PAM_SU_FILE").bak-$TIMESTAMP'"
+        fi
+        log "[DRY-RUN] ensure managed pam_wheel block in '$PAM_SU_FILE'"
+        add_skipped "2.2.1 dry-run: wheel group and pam_wheel rule would be enforced"
+        return 0
+    fi
+
+    if ! pam_wheel_group_exists; then
+        groupadd wheel
+        python3 - "$MANIFEST_FILE" <<'PYJSON'
+import sys, json, pathlib
+path = pathlib.Path(sys.argv[1])
+data = json.loads(path.read_text(encoding='utf-8'))
+lst = data.setdefault("created_groups", [])
+if "wheel" not in lst:
+    lst.append("wheel")
+path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding='utf-8')
+PYJSON
+        record_manifest_apply_report "2.2.1 created group wheel"
+    fi
+
+    [[ -f "$PAM_SU_FILE" ]] || die "Файл не найден: $PAM_SU_FILE"
+
+    if [[ -f "$PAM_SU_FILE" ]]; then
+        local backup_path="$STATE_DIR/$(basename "$PAM_SU_FILE").bak-$TIMESTAMP"
+        cp -a "$PAM_SU_FILE" "$backup_path"
+        record_manifest_backup "$backup_path"
+        need_backup=1
+    fi
+
+    python3 - "$PAM_SU_FILE" <<'PYJSON'
+import sys, pathlib, re
+path = pathlib.Path(sys.argv[1])
+text = path.read_text(encoding='utf-8')
+begin = "# BEGIN SecureLinux-NG 2.2.1"
+end = "# END SecureLinux-NG 2.2.1"
+line = "auth required pam_wheel.so use_uid group=wheel"
+block = begin + "\n" + line + "\n" + end + "\n"
+
+pattern = re.compile(r'(?ms)^# BEGIN SecureLinux-NG 2\.2\.1\n.*?^# END SecureLinux-NG 2\.2\.1\n?')
+if pattern.search(text):
+    text = pattern.sub(block, text)
+else:
+    if not text.endswith("\n"):
+        text += "\n"
+    text += "\n" + block
+
+path.write_text(text, encoding='utf-8')
+PYJSON
+
+    if pam_wheel_rule_present; then
+        record_manifest_modified_file "$PAM_SU_FILE"
+        record_manifest_apply_report "2.2.1 enforced in $PAM_SU_FILE"
+        add_safe "2.2.1 su restricted via pam_wheel and group wheel"
+    else
+        add_error "2.2.1 pam_wheel rule verification failed after update of $PAM_SU_FILE"
+        record_manifest_warning "2.2.1 pam_wheel rule verification failed after update of $PAM_SU_FILE"
         return 1
     fi
 }
@@ -527,6 +642,7 @@ run_check_mode() {
     log "[i] Режим check"
     run_preflight
     check_ssh_root_login_module
+    check_pam_wheel_module
     ensure_state_dir
     write_report
     print_report_stdout
@@ -539,6 +655,7 @@ run_apply_mode() {
     manifest_init
 
     apply_ssh_root_login_module
+    apply_pam_wheel_module
 
     write_report
     print_report_stdout

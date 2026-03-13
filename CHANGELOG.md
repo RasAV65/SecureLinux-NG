@@ -22,4 +22,6 @@
 ### Added
 - first real hardening module `2.1.2`: disable SSH root login via `/etc/ssh/sshd_config.d/60-securelinux-ng-root-login.conf`
 - `--check` and `--apply` coverage for SSH root login enforcement
-- `sshd -t` validation after apply
+- `sshd -t` validation after apply\n- `2.2.1`: restrict `su` via `pam_wheel.so use_uid group=wheel`
+- group `wheel` creation during apply if absent
+- managed block insertion into `/etc/pam.d/su`

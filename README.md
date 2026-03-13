@@ -54,8 +54,14 @@ SecureLinux-NG — новый проект безопасной настройк
 - dry-run skeleton
 - syntax/smoke tests
 
-### Первый hardening-модуль
+### Первые hardening-модули
 - `2.1.2` — отключение входа `root` по SSH через drop-in:
   - файл: `/etc/ssh/sshd_config.d/60-securelinux-ng-root-login.conf`
   - параметр: `PermitRootLogin no`
+  - поддержка: `--check`, `--apply`, `--apply --dry-run`
+
+- `2.2.1` — ограничение `su` через `pam_wheel.so use_uid` и группу `wheel`:
+  - файл: `/etc/pam.d/su`
+  - правило: `auth required pam_wheel.so use_uid group=wheel`
+  - создаётся группа: `wheel` (если отсутствует)
   - поддержка: `--check`, `--apply`, `--apply --dry-run`
