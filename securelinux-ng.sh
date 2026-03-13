@@ -306,6 +306,21 @@ restore_sudo_policy_module() {
     restore_file_from_manifest "$SUDO_POLICY_DROPIN"
 }
 
+write_metadata_snapshot() {
+    local target="$1"
+    local snapshot="$2"
+    python3 - "$target" "$snapshot" <<'PYJSON'
+import sys, pathlib, os, stat
+target = pathlib.Path(sys.argv[1])
+snapshot = pathlib.Path(sys.argv[2])
+st = target.stat()
+snapshot.write_text(
+    f"TARGET={target}\nMODE={stat.S_IMODE(st.st_mode):o}\nUID={st.st_uid}\nGID={st.st_gid}\n",
+    encoding="utf-8"
+)
+PYJSON
+}
+
 restore_read_stat_field() {
     local meta_file="$1"
     local key="$2"
@@ -314,12 +329,24 @@ import sys, pathlib, re
 path = pathlib.Path(sys.argv[1])
 key = sys.argv[2]
 text = path.read_text(encoding='utf-8', errors='replace')
-patterns = {
+
+machine_patterns = {
+    "access": r"(?m)^MODE=(\d+)$",
+    "uid": r"(?m)^UID=(\d+)$",
+    "gid": r"(?m)^GID=(\d+)$",
+}
+legacy_patterns = {
     "access": r"Access:\s*\((\d+)/",
     "uid": r"Uid:\s*\(\s*(\d+)/",
     "gid": r"Gid:\s*\(\s*(\d+)/",
 }
-m = re.search(patterns[key], text)
+
+m = re.search(machine_patterns[key], text)
+if m:
+    print(m.group(1))
+    raise SystemExit(0)
+
+m = re.search(legacy_patterns[key], text)
 print(m.group(1) if m else "")
 PYJSON
 }
@@ -457,7 +484,7 @@ apply_fs_critical_file_one() {
     fi
 
     backup_path="$STATE_DIR/$(basename "$target").meta-$TIMESTAMP.txt"
-    stat "$target" > "$backup_path"
+    write_metadata_snapshot "$target" "$backup_path"
     record_manifest_backup "$target" "$backup_path"
 
     chown "root:${exp_group}" "$target"
@@ -576,7 +603,7 @@ apply_cron_target_one() {
     fi
 
     backup_path="$STATE_DIR/$(basename "$path").meta-$TIMESTAMP.txt"
-    stat "$path" > "$backup_path"
+    write_metadata_snapshot "$path" "$backup_path"
     record_manifest_backup "$path" "$backup_path"
 
     chown "${exp_owner}:${exp_group}" "$path"
@@ -681,7 +708,7 @@ apply_systemd_unit_one() {
     fi
 
     backup_path="$STATE_DIR/$(basename "$path").meta-$TIMESTAMP.txt"
-    stat "$path" > "$backup_path"
+    write_metadata_snapshot "$path" "$backup_path"
     record_manifest_backup "$path" "$backup_path"
 
     chown root:root "$path"
