@@ -444,7 +444,18 @@ ok = 0
 risky = 0
 for key, expected in targets.items():
     try:
-        value = subprocess.check_output(["sysctl", "-n", key], text=True).strip()
+        res = subprocess.run(
+            ["sysctl", "-n", key],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if res.returncode != 0:
+            err = (res.stderr or "").strip() or f"exit={res.returncode}"
+            print(f"RISK\t{key}\tread_failed:{err}")
+            risky += 1
+            continue
+        value = (res.stdout or "").strip()
     except Exception as e:
         print(f"RISK\t{key}\tread_failed:{e}")
         risky += 1

@@ -107,6 +107,13 @@ SecureLinux-NG — новый проект безопасной настройк
   - drop-in `*.conf` → `root:root`, `0644`
   - поддержка: `--check`, `--apply`, `--apply --dry-run`
 
+- `2.4.1`, `2.4.2`, `2.4.8` — базовый sysctl-модуль защиты ядра:
+  - `kernel.dmesg_restrict = 1`
+  - `kernel.kptr_restrict = 2`
+  - `net.core.bpf_jit_harden = 2`
+  - managed drop-in: `/etc/sysctl.d/60-securelinux-ng-kernel.conf`
+  - поддержка: `--check`, `--apply`, `--apply --dry-run`, `--restore`
+
 ## Restore
 
 Сейчас `--restore` умеет:

@@ -29,6 +29,8 @@
 - add smoke assertions for FSTEC summary in stdout
 - `2.3.2`: add runtime executable/library permissions scan with policy-gated detect-only apply
 - `2.3.4`: add sudo command paths permissions scan with policy-gated detect-only apply
+- `2.4.1`, `2.4.2`, `2.4.8`: add base kernel sysctl hardening module with restore support
+- suppress non-root sysctl stderr noise in kernel sysctl check module
 
 ### Fixed
 - fix unset shell variable in `2.3.2` dry-run summary output
