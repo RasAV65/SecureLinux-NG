@@ -114,3 +114,12 @@ SecureLinux-NG — новый проект безопасной настройк
 - для `check`, `report`, `restore` при недоступности `STATE_DIR` используется fallback:
   - `./.securelinux-ng-state`
 - fallback сопровождается warning-сообщением в report/stdout.
+
+### Покрытие ФСТЭК в report
+
+В `report-*.json` и stdout summary сейчас дополнительно отражаются:
+- `fstec_items`
+- `fstec_summary`
+- количество реализованных пунктов
+- количество `partial` / `done`
+- тип restore-модели для каждого реализованного пункта

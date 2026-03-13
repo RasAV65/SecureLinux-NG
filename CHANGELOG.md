@@ -24,6 +24,9 @@
 - fix `record_manifest_backup` call in systemd permissions module
 - switch metadata restore snapshots to machine-readable `MODE/UID/GID` format with fallback for legacy snapshots
 - add writable fallback `STATE_DIR` for non-root `check/report/restore` runs
+- add `fstec_items` and `fstec_summary` to generated report output
+- extend smoke test with `--restore --manifest` path
+- add smoke assertions for FSTEC summary in stdout
 
 ### Fixed
 - dry-run summary output without reading a non-existent report file
