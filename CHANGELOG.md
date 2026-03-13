@@ -18,6 +18,8 @@
 - `2.2.2`: add managed sudo policy drop-in `/etc/sudoers.d/60-securelinux-ng-policy` with `visudo` validation
 - `2.3.3`: add initial cron ownership/perms module for standard cron targets
 - `2.3.5`: add initial systemd unit/drop-in ownership/perms module for `/etc/systemd/system`
+- add basic restore flow for managed SSH/PAM/sudo files and created group `wheel`
+- add `--manifest FILE` support for restore
 
 ### Fixed
 - dry-run summary output without reading a non-existent report file

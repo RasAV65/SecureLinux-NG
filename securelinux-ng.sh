@@ -39,6 +39,9 @@ PAM_WHEEL_LINE="auth required pam_wheel.so use_uid group=wheel"
 SUDO_POLICY_DROPIN="/etc/sudoers.d/60-securelinux-ng-policy"
 SUDO_POLICY_CONTENT=$'# Managed by SecureLinux-NG\n%wheel ALL=(ALL:ALL) ALL\n'
 
+RESTORE_MANIFEST=""
+RESTORE_SOURCE_MANIFEST=""
+
 FS_CRITICAL_FILES=("/etc/passwd" "/etc/group" "/etc/shadow")
 CRON_CRITICAL_TARGETS=(
     "/etc/crontab:file:600:root:root"
@@ -66,7 +69,7 @@ Usage:
   ./securelinux-ng.sh --version
   ./securelinux-ng.sh --check [--profile PROFILE] [--config FILE]
   ./securelinux-ng.sh --apply [--dry-run] [--profile PROFILE] [--config FILE]
-  ./securelinux-ng.sh --restore [--profile PROFILE] [--config FILE]
+  ./securelinux-ng.sh --restore [--manifest FILE] [--profile PROFILE] [--config FILE]
   ./securelinux-ng.sh --report [--profile PROFILE] [--config FILE]
 
 Modes:
@@ -79,6 +82,7 @@ Options:
   --dry-run         Show what would be done (valid with --apply only)
   --profile NAME    baseline | strict | paranoid
   --config FILE     External config file
+  --manifest FILE   Manifest to restore from
   --help            Show help
   --version         Show version
 EOF
@@ -134,6 +138,26 @@ PYJSON
 }
 
 record_manifest_backup() {
+    local original_path="$1"
+    local backup_path="$2"
+    [[ -n "${MANIFEST_FILE:-}" ]] || return 0
+    (( DRY_RUN == 1 )) && return 0
+    [[ -f "$MANIFEST_FILE" ]] || return 0
+    python3 - "$MANIFEST_FILE" "$original_path" "$backup_path" <<'PYJSON'
+import sys, json, pathlib
+path = pathlib.Path(sys.argv[1])
+original = sys.argv[2]
+backup = sys.argv[3]
+data = json.loads(path.read_text(encoding='utf-8'))
+lst = data.setdefault("backups", [])
+entry = {"original": original, "backup": backup}
+if entry not in lst:
+    lst.append(entry)
+path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding='utf-8')
+PYJSON
+}
+
+record_manifest_created_file() {
     local path_value="$1"
     [[ -n "${MANIFEST_FILE:-}" ]] || return 0
     (( DRY_RUN == 1 )) && return 0
@@ -143,7 +167,7 @@ import sys, json, pathlib
 path = pathlib.Path(sys.argv[1])
 value = sys.argv[2]
 data = json.loads(path.read_text(encoding='utf-8'))
-lst = data.setdefault("backups", [])
+lst = data.setdefault("created_files", [])
 if value not in lst:
     lst.append(value)
 path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding='utf-8')
@@ -178,6 +202,112 @@ data = json.loads(path.read_text(encoding='utf-8'))
 data.setdefault("irreversible_changes", []).append(msg)
 path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding='utf-8')
 PYJSON
+}
+
+resolve_restore_manifest() {
+    if [[ -n "$RESTORE_MANIFEST" ]]; then
+        [[ -f "$RESTORE_MANIFEST" ]] || die "Manifest для restore не найден: $RESTORE_MANIFEST"
+        RESTORE_SOURCE_MANIFEST="$RESTORE_MANIFEST"
+        return 0
+    fi
+
+    [[ -d "$STATE_DIR" ]] || die "STATE_DIR не найден: $STATE_DIR"
+
+    RESTORE_SOURCE_MANIFEST="$(
+        python3 - "$STATE_DIR" <<'PYJSON'
+import sys, pathlib
+base = pathlib.Path(sys.argv[1])
+items = sorted(base.glob("manifest-*.json"))
+print(items[-1] if items else "")
+PYJSON
+)"
+    [[ -n "$RESTORE_SOURCE_MANIFEST" ]] || die "Не найден manifest для restore в $STATE_DIR"
+    [[ -f "$RESTORE_SOURCE_MANIFEST" ]] || die "Manifest для restore не найден: $RESTORE_SOURCE_MANIFEST"
+}
+
+restore_lookup_backup() {
+    local original_path="$1"
+    python3 - "$RESTORE_SOURCE_MANIFEST" "$original_path" <<'PYJSON'
+import sys, json, pathlib
+path = pathlib.Path(sys.argv[1])
+original = sys.argv[2]
+data = json.loads(path.read_text(encoding='utf-8'))
+for entry in data.get("backups", []):
+    if isinstance(entry, dict) and entry.get("original") == original:
+        print(entry.get("backup", ""))
+        raise SystemExit(0)
+print("")
+PYJSON
+}
+
+restore_has_created_file() {
+    local target="$1"
+    python3 - "$RESTORE_SOURCE_MANIFEST" "$target" <<'PYJSON'
+import sys, json, pathlib
+path = pathlib.Path(sys.argv[1])
+target = sys.argv[2]
+data = json.loads(path.read_text(encoding='utf-8'))
+raise SystemExit(0 if target in data.get("created_files", []) else 1)
+PYJSON
+}
+
+restore_has_created_group() {
+    local target="$1"
+    python3 - "$RESTORE_SOURCE_MANIFEST" "$target" <<'PYJSON'
+import sys, json, pathlib
+path = pathlib.Path(sys.argv[1])
+target = sys.argv[2]
+data = json.loads(path.read_text(encoding='utf-8'))
+raise SystemExit(0 if target in data.get("created_groups", []) else 1)
+PYJSON
+}
+
+restore_file_from_manifest() {
+    local target="$1"
+    local backup
+    backup="$(restore_lookup_backup "$target")"
+
+    if [[ -n "$backup" && -f "$backup" ]]; then
+        cp -a "$backup" "$target"
+        add_safe "restore: restored $target from backup $backup"
+        return 0
+    fi
+
+    if restore_has_created_file "$target"; then
+        if [[ -e "$target" ]]; then
+            rm -f "$target"
+            add_safe "restore: removed created file $target"
+        else
+            add_safe "restore: created file already absent $target"
+        fi
+        return 0
+    fi
+
+    add_warning "restore: no backup mapping for $target"
+    return 0
+}
+
+restore_ssh_root_login_module() {
+    restore_file_from_manifest "$SSH_ROOT_LOGIN_DROPIN"
+}
+
+restore_pam_wheel_module() {
+    restore_file_from_manifest "$PAM_SU_FILE"
+    if restore_has_created_group "wheel"; then
+        if getent group wheel >/dev/null 2>&1; then
+            groupdel wheel && add_safe "restore: removed created group wheel" || add_warning "restore: failed to remove group wheel"
+        else
+            add_safe "restore: created group wheel already absent"
+        fi
+    fi
+}
+
+restore_sudo_policy_module() {
+    restore_file_from_manifest "$SUDO_POLICY_DROPIN"
+}
+
+restore_unhandled_metadata_modules_notice() {
+    add_warning "restore: automatic rollback for 2.3.1/2.3.3/2.3.5 is not implemented yet; only metadata snapshots were recorded"
 }
 
 fs_expected_mode() {
@@ -259,7 +389,7 @@ apply_fs_critical_file_one() {
 
     backup_path="$STATE_DIR/$(basename "$target").meta-$TIMESTAMP.txt"
     stat "$target" > "$backup_path"
-    record_manifest_backup "$backup_path"
+    record_manifest_backup "$target" "$backup_path"
 
     chown "root:${exp_group}" "$target"
     chmod "${exp_mode}" "$target"
@@ -378,7 +508,7 @@ apply_cron_target_one() {
 
     backup_path="$STATE_DIR/$(basename "$path").meta-$TIMESTAMP.txt"
     stat "$path" > "$backup_path"
-    record_manifest_backup "$backup_path"
+    record_manifest_backup "$path" "$backup_path"
 
     chown "${exp_owner}:${exp_group}" "$path"
     chmod "${exp_mode}" "$path"
@@ -580,13 +710,17 @@ apply_sudo_policy_module() {
     if [[ -f "$SUDO_POLICY_DROPIN" ]]; then
         local backup_path="$STATE_DIR/$(basename "$SUDO_POLICY_DROPIN").bak-$TIMESTAMP"
         cp -a "$SUDO_POLICY_DROPIN" "$backup_path"
-        record_manifest_backup "$backup_path"
+        record_manifest_backup "$SUDO_POLICY_DROPIN" "$backup_path"
     fi
+
+    local existed_before=0
+    [[ -e "$SUDO_POLICY_DROPIN" ]] && existed_before=1 || true
 
     printf '%s' "$SUDO_POLICY_CONTENT" > "$SUDO_POLICY_DROPIN"
     chmod 440 "$SUDO_POLICY_DROPIN"
 
     if visudo -cf "$SUDO_POLICY_DROPIN" >/dev/null 2>&1; then
+        (( existed_before == 0 )) && record_manifest_created_file "$SUDO_POLICY_DROPIN"
         record_manifest_modified_file "$SUDO_POLICY_DROPIN"
         record_manifest_apply_report "2.2.2 enforced via $SUDO_POLICY_DROPIN"
         add_safe "2.2.2 sudo policy enforced via drop-in: $SUDO_POLICY_DROPIN"
@@ -663,12 +797,16 @@ apply_ssh_root_login_module() {
     if [[ -f "$SSH_ROOT_LOGIN_DROPIN" ]]; then
         local backup_path="$STATE_DIR/$(basename "$SSH_ROOT_LOGIN_DROPIN").bak-$TIMESTAMP"
         cp -a "$SSH_ROOT_LOGIN_DROPIN" "$backup_path"
-        record_manifest_backup "$backup_path"
+        record_manifest_backup "$SSH_ROOT_LOGIN_DROPIN" "$backup_path"
     fi
+
+    local existed_before=0
+    [[ -e "$SSH_ROOT_LOGIN_DROPIN" ]] && existed_before=1 || true
 
     printf '%s' "$SSH_ROOT_LOGIN_CONTENT" > "$SSH_ROOT_LOGIN_DROPIN"
 
     if sshd -t; then
+        (( existed_before == 0 )) && record_manifest_created_file "$SSH_ROOT_LOGIN_DROPIN"
         record_manifest_modified_file "$SSH_ROOT_LOGIN_DROPIN"
         record_manifest_apply_report "2.1.2 enforced via $SSH_ROOT_LOGIN_DROPIN"
         add_safe "2.1.2 SSH root login disabled via drop-in: $SSH_ROOT_LOGIN_DROPIN"
@@ -754,7 +892,7 @@ PYJSON
     if [[ -f "$PAM_SU_FILE" ]]; then
         local backup_path="$STATE_DIR/$(basename "$PAM_SU_FILE").bak-$TIMESTAMP"
         cp -a "$PAM_SU_FILE" "$backup_path"
-        record_manifest_backup "$backup_path"
+        record_manifest_backup "$PAM_SU_FILE" "$backup_path"
         need_backup=1
     fi
 
@@ -832,6 +970,14 @@ parse_args() {
             --config=*)
                 CONFIG_FILE="${1#*=}"
                 ;;
+            --manifest)
+                shift
+                [[ $# -gt 0 ]] || die "После --manifest требуется путь к manifest"
+                RESTORE_MANIFEST="$1"
+                ;;
+            --manifest=*)
+                RESTORE_MANIFEST="${1#*=}"
+                ;;
             *)
                 die "Неизвестный аргумент: $1"
                 ;;
@@ -892,6 +1038,9 @@ PYCFG
                 ;;
             MANIFEST_FILE)
                 MANIFEST_FILE="$v"
+                ;;
+            RESTORE_MANIFEST)
+                RESTORE_MANIFEST="$v"
                 ;;
             *)
                 add_warning "Неизвестный ключ в config пропущен: $k"
@@ -1121,10 +1270,12 @@ run_restore_mode() {
     log "[i] Режим restore"
     run_preflight
     ensure_state_dir
-    manifest_init
+    resolve_restore_manifest
 
-    add_skipped "Restore framework активирован, но restore-обработчики ещё не подключены"
-    add_warning "Автоматический откат пока не выполнялся"
+    restore_ssh_root_login_module
+    restore_pam_wheel_module
+    restore_sudo_policy_module
+    restore_unhandled_metadata_modules_notice
 
     write_report
     print_report_stdout

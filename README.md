@@ -52,6 +52,7 @@ SecureLinux-NG — новый проект безопасной настройк
 - manifest skeleton
 - report skeleton
 - dry-run skeleton
+- basic restore flow for managed files/groups
 - syntax/smoke tests
 
 ### Первые hardening-модули
@@ -92,3 +93,16 @@ SecureLinux-NG — новый проект безопасной настройк
   - unit-файлы `*.service`, `*.socket`, `*.timer`, `*.mount`, `*.path`, `*.target`, `*.slice` → `root:root`, `0644`
   - drop-in `*.conf` → `root:root`, `0644`
   - поддержка: `--check`, `--apply`, `--apply --dry-run`
+
+## Restore
+
+Сейчас `--restore` умеет:
+- брать manifest из `--manifest FILE` или автоматически выбирать последний `manifest-*.json` из `STATE_DIR`;
+- восстанавливать managed SSH drop-in;
+- восстанавливать managed sudoers drop-in;
+- восстанавливать `/etc/pam.d/su` из backup;
+- удалять группу `wheel`, если она была создана самим SecureLinux-NG.
+
+Ограничение текущего этапа:
+- автоматический rollback для модулей `2.3.1`, `2.3.3`, `2.3.5` пока не реализован полностью;
+- по ним сохраняются только metadata snapshots, и это отражается warning-сообщением.

@@ -37,14 +37,14 @@
 | Пункт | Статус | Код/блок | Проверка | Комментарий |
 |---|---|---|---|---|
 | 2.1.1. Не допускать пустые пароли / обеспечить пароль или блокировку по паролю | not started | — | — | В `NG` ещё нет модуля проверки/исправления пустых паролей и состояния `/etc/shadow` |
-| 2.1.2. Отключить вход root по SSH (`PermitRootLogin no`) | partial | `check_ssh_root_login_module()` / `apply_ssh_root_login_module()` | `--check`, `--apply`, `sshd -t`, наличие `/etc/ssh/sshd_config.d/60-securelinux-ng-root-login.conf` | Реализован первый SSH-модуль через drop-in; restore-обработчик ещё не добавлен |
+| 2.1.2. Отключить вход root по SSH (`PermitRootLogin no`) | partial | `check_ssh_root_login_module()` / `apply_ssh_root_login_module()` | `--check`, `--apply`, `sshd -t`, наличие `/etc/ssh/sshd_config.d/60-securelinux-ng-root-login.conf` | Реализован первый SSH-модуль через drop-in; добавлен базовый restore managed file |
 
 ## 2.2. Ограничение механизмов получения привилегий
 
 | Пункт | Статус | Код/блок | Проверка | Комментарий |
 |---|---|---|---|---|
-| 2.2.1. Ограничить `su` через `pam_wheel.so use_uid` и группу `wheel` | partial | `check_pam_wheel_module()` / `apply_pam_wheel_module()` | `--check`, `--apply`, наличие группы `wheel`, активное правило в `/etc/pam.d/su` | Реализован первый PAM / `su`-модуль; restore-обработчик ещё не добавлен |
-| 2.2.2. Ограничить пользователей/команды в `sudoers` | partial | `check_sudo_policy_module()` / `apply_sudo_policy_module()` | `--check`, `--apply`, `visudo -cf`, наличие `/etc/sudoers.d/60-securelinux-ng-policy` | Реализована базовая sudo policy model для `%wheel`; granular allowlist-команды ещё не добавлены |
+| 2.2.1. Ограничить `su` через `pam_wheel.so use_uid` и группу `wheel` | partial | `check_pam_wheel_module()` / `apply_pam_wheel_module()` | `--check`, `--apply`, наличие группы `wheel`, активное правило в `/etc/pam.d/su` | Реализован первый PAM / `su`-модуль; добавлен базовый restore `/etc/pam.d/su` и группы `wheel` |
+| 2.2.2. Ограничить пользователей/команды в `sudoers` | partial | `check_sudo_policy_module()` / `apply_sudo_policy_module()` | `--check`, `--apply`, `visudo -cf`, наличие `/etc/sudoers.d/60-securelinux-ng-policy` | Реализована базовая sudo policy model для `%wheel`; добавлен базовый restore managed sudoers drop-in |
 
 ## 2.3. Настройка прав доступа к объектам файловой системы
 
