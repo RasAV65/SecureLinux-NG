@@ -323,14 +323,14 @@ PYJSON
 
 apply_runtime_paths_module() {
     if (( DRY_RUN == 1 )); then
-        while IFS=$'\t' read -r kind path reason; do
+        while IFS=$'\t' read -r kind a b c; do
             [[ -n "${kind:-}" ]] || continue
             case "$kind" in
                 SUMMARY)
-                    log "[DRY-RUN] 2.3.2 runtime scan total=$path ok=$reason risky=$4"
+                    log "[DRY-RUN] 2.3.2 runtime scan total=$a ok=$b risky=$c"
                     ;;
                 RISK)
-                    log "[DRY-RUN] 2.3.2 would review '$path' reason='$reason'"
+                    log "[DRY-RUN] 2.3.2 would review '$a' reason='$b'"
                     ;;
             esac
         done < <(check_runtime_paths_module)
