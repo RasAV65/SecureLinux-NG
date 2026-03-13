@@ -18,7 +18,8 @@ EOF
 ./securelinux-ng.sh --check --config "$TMP_CONFIG" | grep -q '2.2.1' &&
 ./securelinux-ng.sh --check --config "$TMP_CONFIG" | grep -q '2.2.2' &&
 ./securelinux-ng.sh --check --config "$TMP_CONFIG" | grep -q '2.3.1' &&
-./securelinux-ng.sh --check --config "$TMP_CONFIG" | grep -q '2.3.3'
+./securelinux-ng.sh --check --config "$TMP_CONFIG" | grep -q '2.3.3' &&
+./securelinux-ng.sh --check --config "$TMP_CONFIG" | grep -q '2.3.5'
 
 rc=$?
 rm -f "$TMP_CONFIG"

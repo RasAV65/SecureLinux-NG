@@ -49,6 +49,9 @@ CRON_CRITICAL_TARGETS=(
     "/etc/cron.monthly:dir:700:root:root"
 )
 
+SYSTEMD_ETC_DIR="/etc/systemd/system"
+SYSTEMD_UNIT_SUFFIXES=("service" "socket" "timer" "mount" "path" "target" "slice")
+
 declare -a WARNINGS=()
 declare -a ERRORS=()
 declare -a SAFE_ITEMS=()
@@ -400,6 +403,114 @@ apply_cron_targets_module() {
     for spec in "${CRON_CRITICAL_TARGETS[@]}"; do
         apply_cron_target_one "$spec"
     done
+}
+
+systemd_unit_candidates() {
+    [[ -d "$SYSTEMD_ETC_DIR" ]] || return 0
+    python3 - <<'PYJSON'
+from pathlib import Path
+base = Path("/etc/systemd/system")
+suffixes = {".service", ".socket", ".timer", ".mount", ".path", ".target", ".slice"}
+for p in sorted(base.rglob("*")):
+    if p.is_dir():
+        if p.name.endswith(".d") or p == base:
+            print(f"{p}:dir")
+        continue
+    if p.suffix in suffixes or (p.parent.name.endswith(".d") and p.suffix == ".conf"):
+        print(f"{p}:file")
+PYJSON
+}
+
+check_systemd_unit_one() {
+    local path="$1" kind="$2" exp_mode actual_mode actual_og
+    if [[ "$kind" == "dir" ]]; then
+        exp_mode="755"
+    else
+        exp_mode="644"
+    fi
+
+    if [[ ! -e "$path" ]]; then
+        add_risky "2.3.5 systemd target missing: $path"
+        return 0
+    fi
+
+    actual_mode="$(stat -c '%a' "$path")"
+    actual_og="$(stat -c '%U:%G' "$path")"
+
+    if [[ "$actual_mode" == "$exp_mode" && "$actual_og" == "root:root" ]]; then
+        add_safe "2.3.5 compliant: $path mode=$actual_mode owner/group=$actual_og"
+    else
+        add_risky "2.3.5 non-compliant: $path expected root:root mode=${exp_mode}, actual ${actual_og} mode=${actual_mode}"
+    fi
+}
+
+check_systemd_unit_targets_module() {
+    local item path kind
+    while IFS= read -r item; do
+        [[ -n "$item" ]] || continue
+        path="${item%:*}"
+        kind="${item##*:}"
+        check_systemd_unit_one "$path" "$kind"
+    done < <(systemd_unit_candidates)
+}
+
+apply_systemd_unit_one() {
+    local path="$1" kind="$2" exp_mode actual_mode actual_og backup_path
+    if [[ "$kind" == "dir" ]]; then
+        exp_mode="755"
+    else
+        exp_mode="644"
+    fi
+
+    [[ -e "$path" ]] || { add_risky "2.3.5 skipped missing systemd target: $path"; return 0; }
+
+    actual_mode="$(stat -c '%a' "$path")"
+    actual_og="$(stat -c '%U:%G' "$path")"
+
+    if [[ "$actual_mode" == "$exp_mode" && "$actual_og" == "root:root" ]]; then
+        add_safe "2.3.5 already compliant: $path"
+        record_manifest_apply_report "2.3.5 already compliant: $path"
+        return 0
+    fi
+
+    if (( DRY_RUN == 1 )); then
+        log "[DRY-RUN] backup '$path' metadata -> '$STATE_DIR/$(basename "$path").meta-$TIMESTAMP.txt'"
+        log "[DRY-RUN] chown root:root '$path'"
+        log "[DRY-RUN] chmod ${exp_mode} '$path'"
+        add_skipped "2.3.5 dry-run: systemd target metadata would be corrected for $path"
+        return 0
+    fi
+
+    backup_path="$STATE_DIR/$(basename "$path").meta-$TIMESTAMP.txt"
+    stat "$path" > "$backup_path"
+    record_manifest_backup "$backup_path"
+
+    chown root:root "$path"
+    chmod "$exp_mode" "$path"
+
+    actual_mode="$(stat -c '%a' "$path")"
+    actual_og="$(stat -c '%U:%G' "$path")"
+
+    if [[ "$actual_mode" == "$exp_mode" && "$actual_og" == "root:root" ]]; then
+        record_manifest_modified_file "$path"
+        record_manifest_apply_report "2.3.5 corrected metadata for $path"
+        record_manifest_irreversible_change "2.3.5 metadata changed on $path; previous mode/ownership recorded in backup metadata only"
+        add_safe "2.3.5 corrected: $path mode=$actual_mode owner/group=$actual_og"
+    else
+        add_error "2.3.5 verification failed after correction: $path"
+        record_manifest_warning "2.3.5 verification failed after correction: $path"
+        return 1
+    fi
+}
+
+apply_systemd_unit_targets_module() {
+    local item path kind
+    while IFS= read -r item; do
+        [[ -n "$item" ]] || continue
+        path="${item%:*}"
+        kind="${item##*:}"
+        apply_systemd_unit_one "$path" "$kind"
+    done < <(systemd_unit_candidates)
 }
 
 sudo_policy_status() {
@@ -983,6 +1094,7 @@ run_check_mode() {
     check_sudo_policy_module
     check_fs_critical_files_module
     check_cron_targets_module
+    check_systemd_unit_targets_module
     ensure_state_dir
     write_report
     print_report_stdout
@@ -999,6 +1111,7 @@ run_apply_mode() {
     apply_sudo_policy_module
     apply_fs_critical_files_module
     apply_cron_targets_module
+    apply_systemd_unit_targets_module
 
     write_report
     print_report_stdout

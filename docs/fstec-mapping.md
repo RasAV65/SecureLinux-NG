@@ -54,7 +54,7 @@
 | 2.3.2. Корректные права для исполняемых файлов и библиотек запущенных процессов | not started | — | — | В `NG` ещё нет runtime-files permissions-модуля |
 | 2.3.3. Корректные права для файлов/команд из cron | partial | `check_cron_targets_module()` / `apply_cron_targets_module()` | `--check`, `--apply`, `stat`, проверка mode/owner/group | Реализован начальный cron ownership/perms-модуль для стандартных cron targets; restore-обработчик ещё не добавлен |
 | 2.3.4. Корректные права/владельцы для файлов, выполняемых через sudo | not started | — | — | В `NG` ещё нет sudo executable ownership/perms-модуля |
-| 2.3.5. Корректные права для стартовых скриптов и `.service` | not started | — | — | В `NG` ещё нет system startup perms-модуля |
+| 2.3.5. Корректные права для стартовых скриптов и `.service` | partial | `check_systemd_unit_targets_module()` / `apply_systemd_unit_targets_module()` | `--check`, `--apply`, `stat`, проверка mode/owner/group | Реализован начальный systemd ownership/perms-модуль для targets в `/etc/systemd/system`; restore-обработчик ещё не добавлен |
 
 ## 2.4. Настройка механизмов защиты ядра Linux
 

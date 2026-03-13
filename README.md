@@ -86,3 +86,9 @@ SecureLinux-NG — новый проект безопасной настройк
   - `/etc/cron.weekly` → `root:root`, `0700`
   - `/etc/cron.monthly` → `root:root`, `0700`
   - поддержка: `--check`, `--apply`, `--apply --dry-run`
+
+- `2.3.5` — контроль владельца/группы/прав для systemd unit/drop-in targets в `/etc/systemd/system`:
+  - каталог `/etc/systemd/system` и `*.d` → `root:root`, `0755`
+  - unit-файлы `*.service`, `*.socket`, `*.timer`, `*.mount`, `*.path`, `*.target`, `*.slice` → `root:root`, `0644`
+  - drop-in `*.conf` → `root:root`, `0644`
+  - поддержка: `--check`, `--apply`, `--apply --dry-run`
