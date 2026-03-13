@@ -13,7 +13,8 @@ EOF
 ./securelinux-ng.sh --help >/dev/null &&
 ./securelinux-ng.sh --check --config "$TMP_CONFIG" >/dev/null &&
 ./securelinux-ng.sh --apply --dry-run --config "$TMP_CONFIG" >/dev/null &&
-./securelinux-ng.sh --report --config "$TMP_CONFIG" >/dev/null
+./securelinux-ng.sh --report --config "$TMP_CONFIG" >/dev/null &&
+./securelinux-ng.sh --check --config "$TMP_CONFIG" | grep -q '2.1.2'
 
 rc=$?
 rm -f "$TMP_CONFIG"

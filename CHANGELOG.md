@@ -18,3 +18,8 @@
 - создан новый каркас проекта
 - добавлена базовая структура документации
 - справочные материалы вынесены в `research/`
+
+### Added
+- first real hardening module `2.1.2`: disable SSH root login via `/etc/ssh/sshd_config.d/60-securelinux-ng-root-login.conf`
+- `--check` and `--apply` coverage for SSH root login enforcement
+- `sshd -t` validation after apply

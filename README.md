@@ -41,3 +41,21 @@ SecureLinux-NG — новый проект безопасной настройк
 ## Текущая версия
 
 `16.0.0`
+
+
+## Что уже реализовано
+
+### Framework
+- CLI framework
+- config loading
+- preflight skeleton
+- manifest skeleton
+- report skeleton
+- dry-run skeleton
+- syntax/smoke tests
+
+### Первый hardening-модуль
+- `2.1.2` — отключение входа `root` по SSH через drop-in:
+  - файл: `/etc/ssh/sshd_config.d/60-securelinux-ng-root-login.conf`
+  - параметр: `PermitRootLogin no`
+  - поддержка: `--check`, `--apply`, `--apply --dry-run`

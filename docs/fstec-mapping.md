@@ -37,7 +37,7 @@
 | Пункт | Статус | Код/блок | Проверка | Комментарий |
 |---|---|---|---|---|
 | 2.1.1. Не допускать пустые пароли / обеспечить пароль или блокировку по паролю | not started | — | — | В `NG` ещё нет модуля проверки/исправления пустых паролей и состояния `/etc/shadow` |
-| 2.1.2. Отключить вход root по SSH (`PermitRootLogin no`) | not started | — | — | В `NG` ещё нет SSH-модуля |
+| 2.1.2. Отключить вход root по SSH (`PermitRootLogin no`) | partial | `check_ssh_root_login_module()` / `apply_ssh_root_login_module()` | `--check`, `--apply`, `sshd -t`, наличие `/etc/ssh/sshd_config.d/60-securelinux-ng-root-login.conf` | Реализован первый SSH-модуль через drop-in; restore-обработчик ещё не добавлен |
 
 ## 2.2. Ограничение механизмов получения привилегий
 

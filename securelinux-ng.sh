@@ -28,6 +28,9 @@ HAS_DOCKER=0
 HAS_PODMAN=0
 HAS_K8S=0
 
+SSH_ROOT_LOGIN_DROPIN="/etc/ssh/sshd_config.d/60-securelinux-ng-root-login.conf"
+SSH_ROOT_LOGIN_CONTENT=$'# Managed by SecureLinux-NG\nPermitRootLogin no\n'
+
 declare -a WARNINGS=()
 declare -a ERRORS=()
 declare -a SAFE_ITEMS=()
@@ -76,6 +79,152 @@ add_safe() { SAFE_ITEMS+=("$1"); }
 add_risky() { RISKY_ITEMS+=("$1"); }
 add_skipped() { SKIPPED_ITEMS+=("$1"); }
 add_policy_gate() { POLICY_GATES+=("$1"); }
+
+record_manifest_warning() {
+    local msg="$1"
+    [[ -n "${MANIFEST_FILE:-}" ]] || return 0
+    (( DRY_RUN == 1 )) && return 0
+    [[ -f "$MANIFEST_FILE" ]] || return 0
+    python3 - "$MANIFEST_FILE" "$msg" <<'PYJSON'
+import sys, json, pathlib
+path = pathlib.Path(sys.argv[1])
+msg = sys.argv[2]
+data = json.loads(path.read_text(encoding='utf-8'))
+data.setdefault("warnings", []).append(msg)
+path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding='utf-8')
+PYJSON
+}
+
+record_manifest_modified_file() {
+    local path_value="$1"
+    [[ -n "${MANIFEST_FILE:-}" ]] || return 0
+    (( DRY_RUN == 1 )) && return 0
+    [[ -f "$MANIFEST_FILE" ]] || return 0
+    python3 - "$MANIFEST_FILE" "$path_value" <<'PYJSON'
+import sys, json, pathlib
+path = pathlib.Path(sys.argv[1])
+value = sys.argv[2]
+data = json.loads(path.read_text(encoding='utf-8'))
+lst = data.setdefault("modified_files", [])
+if value not in lst:
+    lst.append(value)
+path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding='utf-8')
+PYJSON
+}
+
+record_manifest_backup() {
+    local path_value="$1"
+    [[ -n "${MANIFEST_FILE:-}" ]] || return 0
+    (( DRY_RUN == 1 )) && return 0
+    [[ -f "$MANIFEST_FILE" ]] || return 0
+    python3 - "$MANIFEST_FILE" "$path_value" <<'PYJSON'
+import sys, json, pathlib
+path = pathlib.Path(sys.argv[1])
+value = sys.argv[2]
+data = json.loads(path.read_text(encoding='utf-8'))
+lst = data.setdefault("backups", [])
+if value not in lst:
+    lst.append(value)
+path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding='utf-8')
+PYJSON
+}
+
+record_manifest_apply_report() {
+    local msg="$1"
+    [[ -n "${MANIFEST_FILE:-}" ]] || return 0
+    (( DRY_RUN == 1 )) && return 0
+    [[ -f "$MANIFEST_FILE" ]] || return 0
+    python3 - "$MANIFEST_FILE" "$msg" <<'PYJSON'
+import sys, json, pathlib
+path = pathlib.Path(sys.argv[1])
+msg = sys.argv[2]
+data = json.loads(path.read_text(encoding='utf-8'))
+data.setdefault("apply_report", []).append(msg)
+path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding='utf-8')
+PYJSON
+}
+
+ssh_root_login_status() {
+    if [[ -f "$SSH_ROOT_LOGIN_DROPIN" ]]; then
+        if grep -Eq '^[[:space:]]*PermitRootLogin[[:space:]]+no[[:space:]]*$' "$SSH_ROOT_LOGIN_DROPIN"; then
+            echo "configured"
+            return 0
+        fi
+        echo "conflict"
+        return 0
+    fi
+    echo "absent"
+}
+
+check_ssh_root_login_module() {
+    local status
+    status="$(ssh_root_login_status)"
+
+    case "$status" in
+        configured)
+            add_safe "2.1.2 SSH root login disabled via drop-in: $SSH_ROOT_LOGIN_DROPIN"
+            ;;
+        absent)
+            add_risky "2.1.2 SSH root login is not enforced yet: missing $SSH_ROOT_LOGIN_DROPIN"
+            ;;
+        conflict)
+            add_risky "2.1.2 SSH root login drop-in exists but content is not 'PermitRootLogin no': $SSH_ROOT_LOGIN_DROPIN"
+            ;;
+        *)
+            add_error "2.1.2 SSH root login status detection failed"
+            ;;
+    esac
+}
+
+apply_ssh_root_login_module() {
+    local status
+    status="$(ssh_root_login_status)"
+
+    case "$status" in
+        configured)
+            add_safe "2.1.2 SSH root login already disabled: $SSH_ROOT_LOGIN_DROPIN"
+            record_manifest_apply_report "2.1.2 already compliant: $SSH_ROOT_LOGIN_DROPIN"
+            return 0
+            ;;
+        absent|conflict)
+            ;;
+        *)
+            add_error "2.1.2 SSH root login status detection failed during apply"
+            return 1
+            ;;
+    esac
+
+    if (( DRY_RUN == 1 )); then
+        log "[DRY-RUN] mkdir -p '/etc/ssh/sshd_config.d'"
+        if [[ -f "$SSH_ROOT_LOGIN_DROPIN" ]]; then
+            log "[DRY-RUN] backup '$SSH_ROOT_LOGIN_DROPIN' -> '$STATE_DIR/$(basename "$SSH_ROOT_LOGIN_DROPIN").bak-$TIMESTAMP'"
+        fi
+        log "[DRY-RUN] write '$SSH_ROOT_LOGIN_DROPIN' with 'PermitRootLogin no'"
+        log "[DRY-RUN] sshd -t"
+        add_skipped "2.1.2 dry-run: SSH root login drop-in would be written"
+        return 0
+    fi
+
+    mkdir -p /etc/ssh/sshd_config.d
+
+    if [[ -f "$SSH_ROOT_LOGIN_DROPIN" ]]; then
+        local backup_path="$STATE_DIR/$(basename "$SSH_ROOT_LOGIN_DROPIN").bak-$TIMESTAMP"
+        cp -a "$SSH_ROOT_LOGIN_DROPIN" "$backup_path"
+        record_manifest_backup "$backup_path"
+    fi
+
+    printf '%s' "$SSH_ROOT_LOGIN_CONTENT" > "$SSH_ROOT_LOGIN_DROPIN"
+
+    if sshd -t; then
+        record_manifest_modified_file "$SSH_ROOT_LOGIN_DROPIN"
+        record_manifest_apply_report "2.1.2 enforced via $SSH_ROOT_LOGIN_DROPIN"
+        add_safe "2.1.2 SSH root login disabled via drop-in: $SSH_ROOT_LOGIN_DROPIN"
+    else
+        add_error "2.1.2 sshd -t failed after writing $SSH_ROOT_LOGIN_DROPIN"
+        record_manifest_warning "2.1.2 sshd -t failed after writing $SSH_ROOT_LOGIN_DROPIN"
+        return 1
+    fi
+}
 
 require_cmds() {
     local missing=()
@@ -377,6 +526,7 @@ PYJSON
 run_check_mode() {
     log "[i] Режим check"
     run_preflight
+    check_ssh_root_login_module
     ensure_state_dir
     write_report
     print_report_stdout
@@ -388,8 +538,7 @@ run_apply_mode() {
     ensure_state_dir
     manifest_init
 
-    add_skipped "Apply framework активирован, но hardening-блоки ещё не подключены"
-    add_warning "Изменения в систему не вносились"
+    apply_ssh_root_login_module
 
     write_report
     print_report_stdout
