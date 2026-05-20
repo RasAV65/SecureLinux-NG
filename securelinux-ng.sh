@@ -218,6 +218,7 @@ log() {
 
 log_debug() {
     [[ -n "${DEBUG_LOG_FILE:-}" ]] || return 0
+    mkdir -p "$(dirname "$DEBUG_LOG_FILE")" 2>/dev/null || true
     printf '[%s] [DEBUG] %s
 ' "$(date '+%F %T %z')" "$*" >> "$DEBUG_LOG_FILE"
 }
