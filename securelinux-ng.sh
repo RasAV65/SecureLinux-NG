@@ -100,7 +100,7 @@ SYSCTL_ATTACK_SURFACE_DROPIN="/etc/sysctl.d/61-securelinux-ng-attack-surface.con
 SYSCTL_ATTACK_SURFACE_CONTENT=$'# Managed by SecureLinux-NG\nkernel.perf_event_paranoid = 3\nkernel.kexec_load_disabled = 1\nkernel.unprivileged_bpf_disabled = 1\nvm.unprivileged_userfaultfd = 0\ndev.tty.ldisc_autoload = 0\nvm.mmap_min_addr = 4096\nkernel.randomize_va_space = 2\nuser.max_user_namespaces = 0\n'
 
 SYSCTL_USERSPACE_PROTECTION_DROPIN="/etc/sysctl.d/99-securelinux-ng-userspace-protection.conf"
-SYSCTL_USERSPACE_PROTECTION_CONTENT=$'# Managed by SecureLinux-NG\nkernel.yama.ptrace_scope = 3\nfs.protected_symlinks = 1\nfs.protected_hardlinks = 1\nfs.protected_fifos = 2\nfs.protected_regular = 2\nfs.suid_dumpable = 0\n'
+SYSCTL_USERSPACE_PROTECTION_CONTENT=$'# Managed by SecureLinux-NG\nfs.protected_symlinks = 1\nfs.protected_hardlinks = 1\nfs.protected_fifos = 2\nfs.protected_regular = 2\nfs.suid_dumpable = 0\n'
 
 SYSCTL_NETWORK_DROPIN="/etc/sysctl.d/62-securelinux-ng-network.conf"
 SYSCTL_MODULES_DISABLED_DROPIN="/etc/sysctl.d/63-securelinux-ng-modules-disabled.conf"
@@ -922,15 +922,17 @@ profile = sys.argv[1] if len(sys.argv) > 1 else "baseline"
 profile_order = {"baseline": 0, "strict": 1, "paranoid": 2}
 profile_level = profile_order.get(profile, 0)
 
-targets_all = {
-    "kernel.yama.ptrace_scope": ("3", "baseline"),  # ФСТЭК 2.6.1 — все профили
+import os
+targets_all_base = {
     "fs.protected_symlinks": ("1", "baseline"),
     "fs.protected_hardlinks": ("1", "baseline"),
     "fs.protected_fifos": ("2", "baseline"),
     "fs.protected_regular": ("2", "baseline"),
     "fs.suid_dumpable": ("0", "baseline"),
 }
-targets = {k: v[0] for k, v in targets_all.items() if profile_order.get(v[1], 0) <= profile_level}
+if os.path.exists("/proc/sys/kernel/yama/ptrace_scope"):
+    targets_all_base["kernel.yama.ptrace_scope"] = ("3", "baseline")  # ФСТЭК 2.6.1
+targets = {k: v[0] for k, v in targets_all_base.items() if profile_order.get(v[1], 0) <= profile_level}
 
 ok = 0
 risky = 0
@@ -1589,6 +1591,14 @@ apply_sysctl_userspace_protection_module() {
 
     mkdir -p /etc/sysctl.d
 
+    # yama может отсутствовать в Ubuntu minimal — добавляем ptrace_scope только если доступен
+    local _up_content="$SYSCTL_USERSPACE_PROTECTION_CONTENT"
+    if [[ -f /proc/sys/kernel/yama/ptrace_scope ]]; then
+        _up_content=$'# Managed by SecureLinux-NG\nkernel.yama.ptrace_scope = 3\n'${_up_content#*$'\n'}
+    else
+        log "[warn] 2.6.1: kernel.yama.ptrace_scope недоступен (yama не загружен) — параметр пропущен"
+    fi
+
     if [[ -f "$SYSCTL_USERSPACE_PROTECTION_DROPIN" ]]; then
         local backup_path="$STATE_DIR/$(basename "$SYSCTL_USERSPACE_PROTECTION_DROPIN").bak-$TIMESTAMP"
         if ! backup_file_checked "$SYSCTL_USERSPACE_PROTECTION_DROPIN" "$backup_path" "2.6 sysctl userspace"; then
@@ -1601,7 +1611,7 @@ apply_sysctl_userspace_protection_module() {
     local existed_before=0
     [[ -e "$SYSCTL_USERSPACE_PROTECTION_DROPIN" ]] && existed_before=1 || true
 
-    printf '%s' "$SYSCTL_USERSPACE_PROTECTION_CONTENT" > "$SYSCTL_USERSPACE_PROTECTION_DROPIN"
+    printf '%s' "$_up_content" > "$SYSCTL_USERSPACE_PROTECTION_DROPIN"
 
     sysctl --system >>"${DEBUG_LOG_FILE:-/dev/null}" 2>&1 || true
     (( existed_before == 0 )) && record_manifest_created_file "$SYSCTL_USERSPACE_PROTECTION_DROPIN"
